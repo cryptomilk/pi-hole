@@ -40,6 +40,9 @@ coltable=/opt/pihole/COL_TABLE
 
 # Root of the web server
 webroot="/var/www/html"
+if [[ -r /etc/SUSE-brand ]] ; then
+    webroot="/srv/www/htdocs"
+fi
 
 # We store several other directories and
 webInterfaceGitUrl="https://github.com/pi-hole/AdminLTE.git"
@@ -261,17 +264,28 @@ elif is_command rpm ; then
     # Then check if dnf or yum is the package manager
     if is_command dnf ; then
         PKG_MANAGER="dnf"
-    else
+    elif is_command yum ; then
         PKG_MANAGER="yum"
+    elif is_command zypper ; then
+        PKG_MANAGER="zypper"
     fi
 
     # Fedora and family update cache on every PKG_INSTALL call, no need for a separate update.
     UPDATE_PKG_CACHE=":"
     PKG_INSTALL=(${PKG_MANAGER} install -y)
-    PKG_COUNT="${PKG_MANAGER} check-update | egrep '(.i686|.x86|.noarch|.arm|.src)' | wc -l"
-    INSTALLER_DEPS=(dialog git iproute newt procps-ng which)
-    PIHOLE_DEPS=(bind-utils cronie curl findutils nmap-ncat sudo unzip wget libidn2 psmisc sqlite libcap)
-    PIHOLE_WEB_DEPS=(lighttpd lighttpd-fastcgi php-common php-cli php-pdo)
+    if [ "$PKG_MANAGER" = "zypper" ] ; then
+        PKG_COUNT="${PKG_MANAGER} list-updates | egrep '(i686|x86|noarch|arm|aarch|src)' | wc -l"
+        INSTALLER_DEPS=(dialog git iproute2 newt procps which)
+        PIHOLE_DEPS=(bind-utils cronie curl dnsmasq findutils firewalld ncat sudo unzip wget libidn2-4 psmisc sqlite3 libcap2)
+        PIHOLE_WEB_DEPS=(lighttpd php7-pdo php7-fastcgi php7-openssl)
+        LIGHTTPD_CFG="lighttpd.conf.opensuse"
+    else
+        PKG_COUNT="${PKG_MANAGER} check-update | egrep '(.i686|.x86|.noarch|.arm|.src)' | wc -l"
+        INSTALLER_DEPS=(dialog git iproute newt procps-ng which)
+        PIHOLE_DEPS=(bind-utils cronie curl dnsmasq findutils nmap-ncat sudo unzip wget libidn2 psmisc sqlite libcap)
+        PIHOLE_WEB_DEPS=(lighttpd lighttpd-fastcgi php-common php-cli php-pdo)
+        LIGHTTPD_CFG="lighttpd.conf.fedora"
+    fi
     LIGHTTPD_USER="lighttpd"
     LIGHTTPD_GROUP="lighttpd"
     # If the host OS is Fedora,
@@ -336,6 +350,11 @@ elif is_command rpm ; then
             fi
         fi
     fi
+    # If the host OS is Fedora,
+    elif grep -qiE 'openSUSE' /etc/SUSE-brand; then
+        # all required packages should be available by default with the latest opensuse release
+        # ensure 'php7-json' is installed
+        PIHOLE_WEB_DEPS+=('php7-json')
     else
         # Warn user of unsupported version of Fedora or CentOS
         if ! whiptail --defaultno --title "Unsupported RPM based distribution" --yesno "Would you like to continue installation on an unsupported RPM based distribution?\\n\\nPlease ensure the following packages have been installed manually:\\n\\n- lighttpd\\n- lighttpd-fastcgi\\n- PHP version 7+" ${r} ${c}; then
@@ -1404,13 +1423,13 @@ installConfigs() {
             install -m 0644 ${PI_HOLE_LOCAL_REPO}/advanced/lighttpd.conf.d.fastcgi /etc/lighttpd/conf.d/fastcgi.conf
 
             # Enable additional modules
-            sed -i 's/#  "mod_auth",/  "mod_auth",/' /etc/lighttpd/modules.conf
-            sed -i 's/#  "mod_redirect",/  "mod_redirect",/' /etc/lighttpd/modules.conf
-            sed -i 's/#  "mod_rewrite",/  "mod_rewrite",/' /etc/lighttpd/modules.conf
-            sed -i 's/#  "mod_setenv",/  "mod_setenv",/' /etc/lighttpd/modules.conf
+            sed -i 's/^#  "mod_auth",/  "mod_auth",/' /etc/lighttpd/modules.conf
+            sed -i 's/^#  "mod_redirect",/  "mod_redirect",/' /etc/lighttpd/modules.conf
+            sed -i 's/^#  "mod_rewrite",/  "mod_rewrite",/' /etc/lighttpd/modules.conf
+            sed -i 's/^#  "mod_setenv",/  "mod_setenv",/' /etc/lighttpd/modules.conf
 
-            sed -i 's/#include "conf.d\/compress.conf"/include "conf.d\/compress.conf"/' /etc/lighttpd/modules.conf
-            sed -i 's/#include "conf.d\/expire.conf"/include "conf.d\/expire.conf"/' /etc/lighttpd/modules.conf
+            sed -i 's/^#include "conf.d\/compress.conf"/include "conf.d\/compress.conf"/' /etc/lighttpd/modules.conf
+            sed -i 's/^#include "conf.d\/expire.conf"/include "conf.d\/expire.conf"/' /etc/lighttpd/modules.conf
         fi
         # if there is a custom block page in the html/pihole directory, replace 404 handler in lighttpd config
         if [[ -f "${PI_HOLE_DASHBOARD_DIR}/custom.php" ]]; then
@@ -1645,6 +1664,25 @@ install_dependent_packages() {
         fi
         printf "\\n"
         return 0
+    fi
+
+    if is_command zypper ; then
+	    # Install openSUSE packages
+	    for i in "${argArray1[@]}"; do
+		printf "  %b Checking for %s..." "${INFO}" "${i}"
+		if ${PKG_MANAGER} search --installed-only "${i}" &> /dev/null; then
+		    printf "%b  %b Checking for %s" "${OVER}" "${TICK}" "${i}"
+		else
+		    printf "%b  %b Checking for %s (will be installed)" "${OVER}" "${INFO}" "${i}"
+		    installArray+=("${i}")
+		fi
+	    done
+	    if [[ "${#installArray[@]}" -gt 0 ]]; then
+		"${PKG_INSTALL[@]}" "${installArray[@]}" &> /dev/null
+		return
+	    fi
+	    printf "\\n"
+	    return 0
     fi
 
     # Install Fedora/CentOS packages

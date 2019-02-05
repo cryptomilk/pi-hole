@@ -102,14 +102,19 @@ removeAndPurge() {
 removeNoPurge() {
     # Only web directories/files that are created by Pi-hole should be removed
     echo -ne "  ${INFO} Removing Web Interface..."
-    ${SUDO} rm -rf /var/www/html/admin &> /dev/null
-    ${SUDO} rm -rf /var/www/html/pihole &> /dev/null
-    ${SUDO} rm -f /var/www/html/index.lighttpd.orig &> /dev/null
+
+    WWWROOT="/var/www/html"
+    if [[ -d "/srv/www/htdocs/pihole" ]]; then
+        WWWROOT="/srv/www/htdocs"
+    fi
+    ${SUDO} rm -rf ${WWWROOT}/admin &> /dev/null
+    ${SUDO} rm -rf ${WWWROOT}/pihole &> /dev/null
+    ${SUDO} rm -f ${WWWROOT}/index.lighttpd.orig &> /dev/null
 
     # If the web directory is empty after removing these files, then the parent html directory can be removed.
-    if [ -d "/var/www/html" ]; then
-        if [[ ! "$(ls -A /var/www/html)" ]]; then
-            ${SUDO} rm -rf /var/www/html &> /dev/null
+    if [ -d "${WWWROOT}" ]; then
+        if [[ ! "$(ls -A ${WWWROOT})" ]]; then
+            ${SUDO} rm -rf ${WWWROOT} &> /dev/null
         fi
     fi
     echo -e "${OVER}  ${TICK} Removed Web Interface"
